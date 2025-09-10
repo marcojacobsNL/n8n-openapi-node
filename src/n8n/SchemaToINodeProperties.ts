@@ -1,8 +1,8 @@
-import {OpenAPIV3} from "openapi-types";
-import {INodeProperties, NodePropertyTypes} from "n8n-workflow";
-import {RefResolver} from "../openapi/RefResolver";
+import { OpenAPIV3 } from "openapi-types";
+import { INodeProperties, NodePropertyTypes } from "n8n-workflow";
+import { RefResolver } from "../openapi/RefResolver";
 import * as lodash from "lodash";
-import {SchemaExample} from "../openapi/SchemaExample";
+import { SchemaExample } from "../openapi/SchemaExample";
 
 type Schema = OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject;
 type FromSchemaNodeProperty = Pick<INodeProperties, 'type' | 'default' | 'description' | 'options'>;
@@ -38,10 +38,14 @@ export class N8NINodeProperties {
         this.schemaExample = new SchemaExample(doc)
     }
 
-    fromSchema(schema: Schema): FromSchemaNodeProperty {
+    fromSchema(schema: Schema, asCollection: boolean = false): FromSchemaNodeProperty {
+        console.log('schema1', schema)
         schema = this.refResolver.resolve<OpenAPIV3.SchemaObject>(schema)
         let type: NodePropertyTypes;
         let defaultValue = this.schemaExample.extractExample(schema)
+
+        console.log('schema', schema)
+        console.log('defaultValue', defaultValue)
 
         switch (schema.type) {
             case 'boolean':
@@ -54,7 +58,11 @@ export class N8NINodeProperties {
                 defaultValue = defaultValue !== undefined ? defaultValue : '';
                 break;
             case 'object':
-                type = 'json';
+                if (asCollection) {
+                    type = 'collection';
+                } else {
+                    type = 'json';
+                }
                 defaultValue = defaultValue !== undefined ? JSON.stringify(defaultValue, null, 2) : '{}';
                 break;
             case 'array':
@@ -73,6 +81,14 @@ export class N8NINodeProperties {
             default: defaultValue,
             description: schema.description,
         };
+        if (field.type === 'collection') {
+            let options: INodeProperties[] = [];
+            Object.entries(schema.properties!!).forEach(([key, value]) => {
+                const fieldSchemaKeys = this.fromSchemaProperty(key, value)
+                options.push(fieldSchemaKeys)
+            });
+            field.options = options;
+        }
         if (schema.enum && schema.enum.length > 0) {
             field.type = 'options';
             field.options = schema.enum.map((value: string) => {
@@ -90,7 +106,7 @@ export class N8NINodeProperties {
         parameter = this.refResolver.resolve<OpenAPIV3.ParameterObject>(parameter)
         let fieldSchemaKeys
         if (parameter.schema) {
-            fieldSchemaKeys = this.fromSchema(parameter.schema!!);
+            fieldSchemaKeys = this.fromSchema(parameter.schema!!, parameter.style === 'deepObject' || false);
         }
         if (!fieldSchemaKeys) {
             const regexp = /application\/json.*/
