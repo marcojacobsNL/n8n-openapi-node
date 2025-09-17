@@ -39,41 +39,48 @@ export class N8NINodeProperties {
     }
 
     fromSchema(schema: Schema, asCollection: boolean = false): FromSchemaNodeProperty {
-        console.log('schema1', schema)
         schema = this.refResolver.resolve<OpenAPIV3.SchemaObject>(schema)
         let type: NodePropertyTypes;
         let defaultValue = this.schemaExample.extractExample(schema)
 
-        console.log('schema', schema)
-        console.log('defaultValue', defaultValue)
-
-        switch (schema.type) {
-            case 'boolean':
-                type = 'boolean';
-                defaultValue = defaultValue !== undefined ? defaultValue : true;
-                break;
-            case 'string':
-            case undefined:
-                type = 'string';
-                defaultValue = defaultValue !== undefined ? defaultValue : '';
-                break;
-            case 'object':
-                if (asCollection) {
-                    type = 'collection';
-                } else {
+        // Special handling for DateFilter schemas - handled in fromSchemaProperty method
+        // This method will handle regular schemas, DateFilter is handled specially in fromSchemaProperty
+        if (this.refResolver.isDateFilter(schema)) {
+            // Return a basic field structure that will be enhanced in fromSchemaProperty
+            return {
+                type: 'options',
+                default: '',
+                description: schema.description,
+            };
+        } else {
+            switch (schema.type) {
+                case 'boolean':
+                    type = 'boolean';
+                    defaultValue = defaultValue !== undefined ? defaultValue : true;
+                    break;
+                case 'string':
+                case undefined:
+                    type = 'string';
+                    defaultValue = defaultValue !== undefined ? defaultValue : '';
+                    break;
+                case 'object':
+                    if (asCollection) {
+                        type = 'collection';
+                    } else {
+                        type = 'json';
+                    }
+                    defaultValue = defaultValue !== undefined ? JSON.stringify(defaultValue, null, 2) : '{}';
+                    break;
+                case 'array':
                     type = 'json';
-                }
-                defaultValue = defaultValue !== undefined ? JSON.stringify(defaultValue, null, 2) : '{}';
-                break;
-            case 'array':
-                type = 'json';
-                defaultValue = defaultValue !== undefined ? JSON.stringify(defaultValue, null, 2) : '[]';
-                break;
-            case 'number':
-            case 'integer':
-                type = 'number';
-                defaultValue = defaultValue !== undefined ? defaultValue : 0;
-                break;
+                    defaultValue = defaultValue !== undefined ? JSON.stringify(defaultValue, null, 2) : '[]';
+                    break;
+                case 'number':
+                case 'integer':
+                    type = 'number';
+                    defaultValue = defaultValue !== undefined ? defaultValue : 0;
+                    break;
+            }
         }
 
         const field: FromSchemaNodeProperty = {
@@ -84,8 +91,18 @@ export class N8NINodeProperties {
         if (field.type === 'collection') {
             let options: INodeProperties[] = [];
             Object.entries(schema.properties!!).forEach(([key, value]) => {
-                const fieldSchemaKeys = this.fromSchemaProperty(key, value)
-                options.push(fieldSchemaKeys)
+                // Check if this property is a DateFilter schema
+                const resolvedValue = this.refResolver.resolve<OpenAPIV3.SchemaObject>(value)
+                if (this.refResolver.isDateFilter(resolvedValue)) {
+                    // For DateFilter schemas, add multiple fields
+                    const propertyDescription = (value as OpenAPIV3.SchemaObject).description
+                    const dateFilterFields = this.fromDateFilterProperty(key, value, propertyDescription)
+                    options.push(...dateFilterFields)
+                } else {
+                    // For regular schemas, add single field
+                    const fieldSchemaKeys = this.fromSchemaProperty(key, value)
+                    options.push(fieldSchemaKeys)
+                }
             });
             field.options = options;
         }
@@ -177,6 +194,52 @@ export class N8NINodeProperties {
         }
         const field = combine(fieldParameterKeys, fieldSchemaKeys)
         return field
+    }
+
+    fromDateFilterProperty(name: string, property: OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject, description?: string): INodeProperties[] {
+        const schema = this.refResolver.resolve<OpenAPIV3.SchemaObject>(property)
+        const fields: INodeProperties[] = []
+
+        // Create the main options field for predefined date ranges
+        const options: any[] = []
+        if (schema.oneOf) {
+            const enumOption = schema.oneOf.find((option: any) => option.type === 'string' && option.enum) as OpenAPIV3.SchemaObject;
+            if (enumOption && enumOption.enum && Array.isArray(enumOption.enum)) {
+                enumOption.enum.forEach((value: string) => {
+                    options.push({
+                        name: lodash.startCase(value),
+                        value: value,
+                    });
+                });
+            }
+        }
+
+        // Main options field
+        const mainField: INodeProperties = {
+            displayName: lodash.startCase(name),
+            name: name.replace(/\./g, "-"),
+            type: 'options',
+            default: options[0]?.value || '',
+            description: description || schema.description || '',
+            options: options,
+        }
+        fields.push(mainField)
+
+        // Create individual date-time fields for manual input
+        const dateTimeFields = ['gte', 'gt', 'lte', 'lt']
+        dateTimeFields.forEach(suffix => {
+            const fieldName = `${name}_${suffix}`
+            const field: INodeProperties = {
+                displayName: `${lodash.startCase(name)} ${suffix.toUpperCase()}`,
+                name: fieldName.replace(/\./g, "-"),
+                type: 'dateTime',
+                default: '',
+                description: `Greater than or equal to date for ${name}`,
+            }
+            fields.push(field)
+        })
+
+        return fields
     }
 
     fromRequestBody(body: OpenAPIV3.ReferenceObject | OpenAPIV3.RequestBodyObject | undefined): INodeProperties[] {

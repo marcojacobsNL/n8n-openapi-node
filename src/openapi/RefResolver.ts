@@ -1,9 +1,35 @@
-import {OpenAPIV3} from "openapi-types";
+import { OpenAPIV3 } from "openapi-types";
 import * as lodash from "lodash";
 
 export class RefResolver {
     constructor(private doc: any) {
 
+    }
+
+    /**
+     * Check if a schema is a DateFilter type based on its structure
+     * @param schema
+     */
+    isDateFilter(schema: any): boolean {
+        if (schema && typeof schema === 'object') {
+            // Check if it has oneOf with date-time format strings and enum values
+            if (schema.oneOf && Array.isArray(schema.oneOf)) {
+                const hasDateTimeObject = schema.oneOf.some((option: any) =>
+                    option.type === 'object' &&
+                    option.properties &&
+                    Object.values(option.properties).some((prop: any) =>
+                        prop.format === 'date-time'
+                    )
+                );
+                const hasEnumString = schema.oneOf.some((option: any) =>
+                    option.type === 'string' &&
+                    option.enum &&
+                    Array.isArray(option.enum)
+                );
+                return hasDateTimeObject && hasEnumString;
+            }
+        }
+        return false;
     }
 
     /**
@@ -17,6 +43,10 @@ export class RefResolver {
         }
         // @ts-ignore
         if ("oneOf" in schema) {
+            // Special handling for DateFilter schemas - preserve the oneOf structure
+            if (this.isDateFilter(schema)) {
+                return [schema as T, undefined]
+            }
             // @ts-ignore
             schema = schema.oneOf[0]
         }
@@ -38,6 +68,10 @@ export class RefResolver {
         // @ts-ignore
         if ('$ref' in schema) {
             const schemaResolved = this.findRef(schema['$ref']);
+            // Check if the resolved schema is a DateFilter
+            if (this.isDateFilter(schemaResolved)) {
+                return [schemaResolved as T, [schema['$ref']]]
+            }
             // Remove $ref from schema, add all other properties
             const {$ref, ...rest} = schema;
             Object.assign(rest, schemaResolved);
