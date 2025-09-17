@@ -94,10 +94,10 @@ export class N8NINodeProperties {
                 // Check if this property is a DateFilter schema
                 const resolvedValue = this.refResolver.resolve<OpenAPIV3.SchemaObject>(value)
                 if (this.refResolver.isDateFilter(resolvedValue)) {
-                    // For DateFilter schemas, add multiple fields
+                    // For DateFilter schemas, add collection field
                     const propertyDescription = (value as OpenAPIV3.SchemaObject).description
-                    const dateFilterFields = this.fromDateFilterProperty(key, value, propertyDescription)
-                    options.push(...dateFilterFields)
+                    const dateFilterField = this.fromDateFilterProperty(key, value, propertyDescription)
+                    options.push(dateFilterField)
                 } else {
                     // For regular schemas, add single field
                     const fieldSchemaKeys = this.fromSchemaProperty(key, value)
@@ -196,50 +196,38 @@ export class N8NINodeProperties {
         return field
     }
 
-    fromDateFilterProperty(name: string, property: OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject, description?: string): INodeProperties[] {
+    fromDateFilterProperty(name: string, property: OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject, description?: string): INodeProperties {
         const schema = this.refResolver.resolve<OpenAPIV3.SchemaObject>(property)
-        const fields: INodeProperties[] = []
 
-        // Create the main options field for predefined date ranges
-        const options: any[] = []
-        if (schema.oneOf) {
-            const enumOption = schema.oneOf.find((option: any) => option.type === 'string' && option.enum) as OpenAPIV3.SchemaObject;
-            if (enumOption && enumOption.enum && Array.isArray(enumOption.enum)) {
-                enumOption.enum.forEach((value: string) => {
-                    options.push({
-                        name: lodash.startCase(value),
-                        value: value,
-                    });
-                });
-            }
-        }
-
-        // Main options field
-        const mainField: INodeProperties = {
-            displayName: lodash.startCase(name),
-            name: name.replace(/\./g, "-"),
-            type: 'options',
-            default: options[0]?.value || '',
-            description: description || schema.description || '',
-            options: options,
-        }
-        fields.push(mainField)
-
-        // Create individual date-time fields for manual input
+        // Create individual date-time fields as options within a collection
+        const dateTimeOptions: INodeProperties[] = []
         const dateTimeFields = ['gte', 'gt', 'lte', 'lt']
+
         dateTimeFields.forEach(suffix => {
-            const fieldName = `${name}_${suffix}`
             const field: INodeProperties = {
-                displayName: `${lodash.startCase(name)} ${suffix.toUpperCase()}`,
-                name: fieldName.replace(/\./g, "-"),
+                displayName: `${suffix.toUpperCase()}`,
+                name: suffix,
                 type: 'dateTime',
                 default: '',
                 description: `Greater than or equal to date for ${name}`,
             }
-            fields.push(field)
+            dateTimeOptions.push(field)
         })
 
-        return fields
+        // Note: Predefined date range options (today, yesterday, etc.) are removed
+        // Only keeping the individual date-time fields (gte, gt, lte, lt)
+
+        // Create the main collection field
+        const collectionField: INodeProperties = {
+            displayName: lodash.startCase(name),
+            name: name.replace(/\./g, "-"),
+            type: 'collection',
+            default: '{}',
+            description: description || schema.description || '',
+            options: dateTimeOptions,
+        }
+
+        return collectionField
     }
 
     fromRequestBody(body: OpenAPIV3.ReferenceObject | OpenAPIV3.RequestBodyObject | undefined): INodeProperties[] {
