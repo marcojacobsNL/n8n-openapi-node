@@ -1096,6 +1096,162 @@ test("test overrides", () => {
   ]);
 });
 
+test("request body composed schema (allOf)", () => {
+  const paths = {
+    "/api/entities": {
+      "post": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Post a message",
+        "description": "Create a new message. You an only post messages to communities you are a member of. Communities can also post to themselves.",
+        "operationId": "saveMessage",
+        "requestBody": {
+          "description": "description",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Entity"
+              }
+            }
+          },
+          "required": true
+        },
+      }
+    },
+  };
+  const components = {
+    schemas: {
+      Entity: {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Message"
+          },
+          {
+            "$ref": "#/components/schemas/Event"
+          },
+          {
+            "$ref": "#/components/schemas/Question"
+          },
+          {
+            "$ref": "#/components/schemas/Offer"
+          },
+          {
+            "$ref": "#/components/schemas/Warning"
+          }
+        ],
+      },
+      Message: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            example: "Hello, world!",
+          },
+        },
+      },
+      Event: {
+        type: "object",
+        properties: {
+          event: {
+            type: "string",
+            example: "Event",
+          },
+        },
+      },
+      Question: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            example: "Question",
+          },
+        },
+      },
+      Offer: {
+        type: "object",
+        properties: {
+          offer: {
+            type: "string",
+            example: "Offer",
+          },
+        },
+      },
+    },
+  };
+
+  const parser = new N8NPropertiesBuilder(
+    { paths, components },
+    {
+      OperationsCollector: BaseOperationsCollector,
+      operation: new CustomOperationParser(),
+      resource: new CustomResourceParser(),
+    }
+  );
+  const result = parser.build();
+
+  const expected: any[] = [
+    {
+      default: "",
+      displayName: "Resource",
+      name: "resource",
+      noDataExpression: true,
+      options: [
+        {
+          description: "",
+          name: "Messages",
+          value: "Messages",
+        },
+      ],
+      type: "options",
+    },
+    {
+      default: "",
+      displayName: "Operation",
+      displayOptions: {
+        show: {
+          resource: ["Messages"],
+        },
+      },
+      name: "operation",
+      noDataExpression: true,
+      options: [
+        {
+          action: "Post a message",
+          description: "Create a new message. You an only post messages to communities you are a member of. Communities can also post to themselves.",
+          name: "Save Message",
+          routing: {
+            request: {
+              method: "POST",
+              url: "=/api/entities",
+            },
+          },
+          value: "Save Message",
+        },
+      ],
+      type: "options",
+    },
+    {
+      default: "{}",
+      displayName: "Body",
+      displayOptions: {
+        show: {
+          operation: ["Save Message"],
+          resource: ["Messages"],
+        },
+      },
+      name: "body",
+      routing: {
+        request: {
+          body: "={{ JSON.parse($value) }}",
+        },
+      },
+      type: "json",
+    },
+  ];
+  expect(result).toEqual(expected);
+});
+
 test("multiple tags", () => {
   const paths = {
     "/api/entities": {

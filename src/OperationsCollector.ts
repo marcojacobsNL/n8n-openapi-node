@@ -1,13 +1,13 @@
-import {OpenAPIVisitor, OperationContext} from "./openapi/OpenAPIVisitor";
+import { OpenAPIVisitor, OperationContext } from "./openapi/OpenAPIVisitor";
 import * as lodash from "lodash";
 import pino from "pino";
-import {OpenAPIV3} from "openapi-types";
-import {N8NINodeProperties} from "./n8n/SchemaToINodeProperties";
-import {IOperationParser} from "./OperationParser";
-import {OptionsByResourceMap} from "./n8n/OptionsByResourceMap";
-import {INodeProperties} from "n8n-workflow";
-import {replacePathVarsToParameter} from "./n8n/utils";
-import {IResourceParser} from "./ResourceParser";
+import { OpenAPIV3 } from "openapi-types";
+import { N8NINodeProperties } from "./n8n/SchemaToINodeProperties";
+import { IOperationParser } from "./OperationParser";
+import { OptionsByResourceMap } from "./n8n/OptionsByResourceMap";
+import { INodeProperties } from "n8n-workflow";
+import { replacePathVarsToParameter } from "./n8n/utils";
+import { IResourceParser } from "./ResourceParser";
 
 export class BaseOperationsCollector implements OpenAPIVisitor {
     public readonly _fields: INodeProperties[]
@@ -106,14 +106,45 @@ export class BaseOperationsCollector implements OpenAPIVisitor {
             const data = {...this.bindings, error: `${error}`}
             // @ts-ignore
             this.logger.warn(data, 'Failed to parse request body')
-            const msg = "There's no body available for request, kindly use HTTP Request node to send body"
-            const notice: INodeProperties = {
-                displayName: `${context.method.toUpperCase()} ${context.pattern}<br/><br/>${msg}`,
-                name: 'operation',
-                type: 'notice',
-                default: '',
+
+            // If the schema is a composed schema (allOf/oneOf/anyOf), fallback to a single JSON body field
+            const requestBody = operation.requestBody as OpenAPIV3.RequestBodyObject | OpenAPIV3.ReferenceObject | undefined
+            const isRef = (obj: any): obj is OpenAPIV3.ReferenceObject => !!obj && typeof obj === 'object' && '$ref' in obj
+            const hasComposedSchema = (): boolean => {
+                if (!requestBody || isRef(requestBody)) return false
+                const content = requestBody.content || {}
+                const mediaType = Object.keys(content).find((k) => /application\/json.*/.test(k))
+                if (!mediaType) return false
+                const schema = content[mediaType]?.schema as OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined
+                if (!schema) return false
+                // If it's a $ref, parsing failure likely came from a composed target (oneOf/allOf/anyOf)
+                if (isRef(schema)) return true
+                return !!(schema.allOf || schema.oneOf || schema.anyOf)
             }
-            fields.push(notice)
+
+            if (hasComposedSchema()) {
+                const jsonField: INodeProperties = {
+                    displayName: 'Body',
+                    name: 'body',
+                    type: 'json',
+                    default: '{}',
+                    routing: {
+                        request: {
+                            body: '={{ JSON.parse($value) }}',
+                        },
+                    },
+                }
+                fields.push(jsonField)
+            } else {
+                const msg = "There's no body available for request, kindly use HTTP Request node to send body"
+                const notice: INodeProperties = {
+                    displayName: `${context.method.toUpperCase()} ${context.pattern}<br/><br/>${msg}`,
+                    name: 'operation',
+                    type: 'notice',
+                    default: '',
+                }
+                fields.push(notice)
+            }
         }
         return fields;
     }
