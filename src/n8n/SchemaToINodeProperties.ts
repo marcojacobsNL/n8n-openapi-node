@@ -91,6 +91,11 @@ export class N8NINodeProperties {
         if (field.type === 'collection') {
             let options: INodeProperties[] = [];
             Object.entries(schema.properties!!).forEach(([key, value]) => {
+                // Skip readOnly properties
+                if (this.isReadOnlyProperty(value)) {
+                    return;
+                }
+                
                 // Check if this property is a DateFilter schema
                 const resolvedValue = this.refResolver.resolve<OpenAPIV3.SchemaObject>(value)
                 if (this.refResolver.isDateFilter(resolvedValue)) {
@@ -230,6 +235,32 @@ export class N8NINodeProperties {
         return collectionField
     }
 
+    /**
+     * Check if a property is readOnly by examining the resolved schema
+     * @param property The property schema to check
+     * @returns true if the property is readOnly, false otherwise
+     */
+    private isReadOnlyProperty(property: OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject): boolean {
+        const resolvedProperty = this.refResolver.resolve<OpenAPIV3.SchemaObject>(property);
+        
+        // Check if readOnly is directly set on the property
+        if (resolvedProperty.readOnly === true) {
+            return true;
+        }
+        
+        // Check if readOnly is set in allOf schemas
+        if (resolvedProperty.allOf && Array.isArray(resolvedProperty.allOf)) {
+            for (const schema of resolvedProperty.allOf) {
+                const resolvedSchema = this.refResolver.resolve<OpenAPIV3.SchemaObject>(schema);
+                if (resolvedSchema.readOnly === true) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+
     fromRequestBody(body: OpenAPIV3.ReferenceObject | OpenAPIV3.RequestBodyObject | undefined): INodeProperties[] {
         if (!body) {
             return [];
@@ -266,6 +297,12 @@ export class N8NINodeProperties {
         const properties = schema.properties;
         for (const key in properties) {
             const property = properties[key];
+            
+            // Skip readOnly properties
+            if (this.isReadOnlyProperty(property)) {
+                continue;
+            }
+            
             const fieldPropertyKeys: FromSchemaNodeProperty = this.fromSchemaProperty(key, property)
             const fieldDefaults: Partial<INodeProperties> = {
                 required: schema.required && schema.required?.includes(key),
